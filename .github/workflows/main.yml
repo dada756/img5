@@ -1,6 +1,5 @@
 name: Image CDN Load Tester
 
-# Enables manual execution with UI inputs for your global variables
 on:
   workflow_dispatch:
     inputs:
@@ -9,9 +8,9 @@ on:
         required: true
         default: "5000"
       sleep_duration:
-        description: "Sleep duration between requests (in seconds, e.g., 0.5 or 1)"
+        description: "Sleep duration between requests"
         required: true
-        default: "2"
+        default: "1"
 
 jobs:
   execute-load-test:
@@ -30,9 +29,10 @@ jobs:
 
       - name: 🔨 Generate & Run Load Tester
         env:
-          # Passes the GitHub UI inputs to the Python script
           TOTAL_REQUESTS: ${{ github.event.inputs.total_requests }}
           SLEEP_DURATION: ${{ github.event.inputs.sleep_duration }}
+          # Force Python to stream outputs instantly in GitHub Actions
+          PYTHONUNBUFFERED: "1" 
         run: |
           cat << 'EOF' > load_tester.py
           import httpx
@@ -60,22 +60,17 @@ jobs:
 
           def run_load_test():
               if not IMAGE_URLS or IMAGE_URLS[0] == "":
-                  print("❌ Error: Please add URLs to the IMAGE_URLS list in the YAML file.")
+                  print("❌ Error: Please add URLs to the IMAGE_URLS list in the YAML file.", flush=True)
                   return
 
-              print(f"🚀 Starting Load Test: {TOTAL_REQUESTS} requests, {SLEEP_DURATION}s delay...")
-              print("-" * 80)
+              print(f"🚀 Starting Load Test: {TOTAL_REQUESTS} requests, {SLEEP_DURATION}s delay...", flush=True)
+              print("-" * 80, flush=True)
 
-              # Using httpx Client with HTTP/2 enabled natively
               with httpx.Client(http2=True, timeout=15.0) as client:
                   for i in range(TOTAL_REQUESTS):
-                      # Pick a random image URL from the static list
                       url = random.choice(IMAGE_URLS)
-                      
-                      # Generate random Q value between 0.100000 and 99.000000
                       random_q = f"{random.uniform(0.1, 99.0):.6f}"
                       
-                      # Build headers with dynamic cache-busting mechanisms
                       headers = {
                           "Host": "media.moctale.in",
                           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
@@ -91,28 +86,27 @@ jobs:
 
                       try:
                           response = client.get(url, headers=headers)
-                          
-                          # Extract X-Cache header. httpx handles case-insensitivity automatically.
-                          # If header is missing (e.g. bypassed CDN), defaults to 'No-Cache-Header'
                           x_cache = response.headers.get("x-cache", "No-Cache-Header")
                           status_code = response.status_code
                           
-                          # Print in the exact requested format
-                          print(f"[{x_cache}] [{status_code}] [{url}]")
-                          
+                          # Distinct logging based on status code
+                          if status_code == 200:
+                              print(f"[{x_cache}] [{status_code}] [{url}]", flush=True)
+                          else:
+                              print(f"❌ [ERROR] [{x_cache}] [HTTP {status_code}] [{url}] -> Response: {response.text[:100]}", flush=True)
+                              
                       except Exception as e:
-                          print(f"[Error] [000] [{url}] -> {str(e)}")
+                          print(f"⚠️ [NETWORK ERROR] [000] [{url}] -> {str(e)}", flush=True)
 
-                      # Enforce sleep duration (except on the very last request)
                       if i < TOTAL_REQUESTS - 1:
                           time.sleep(SLEEP_DURATION)
                           
-              print("-" * 80)
-              print("✅ Load Test Completed Successfully.")
+              print("-" * 80, flush=True)
+              print("✅ Load Test Completed Successfully.", flush=True)
 
           if __name__ == "__main__":
               run_load_test()
           EOF
 
-          # Execute the dynamically generated python script
-          python load_tester.py
+          # The -u flag ensures unbuffered binary stdout and stderr
+          python -u load_tester.py
