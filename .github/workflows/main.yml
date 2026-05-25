@@ -77,12 +77,13 @@ jobs:
                       
                       # Build headers with dynamic cache-busting mechanisms
                       headers = {
+                          "Host": "media.moctale.in",
                           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
                           "Accept": f"image/png;q={random_q}",
                           "Sec-Fetch-Site": "same-site",
                           "Sec-Fetch-Mode": "no-cors",
                           "Sec-Fetch-Dest": "image",
-                          "Referer": "https://mysite.in/",
+                          "Referer": "https://moctale.in/",
                           "Priority": "0",
                           "Cache-Control": "no-cache",
                           "Pragma": "no-cache"
