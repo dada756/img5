@@ -1,0 +1,117 @@
+name: Image CDN Load Tester
+
+# Enables manual execution with UI inputs for your global variables
+on:
+  workflow_dispatch:
+    inputs:
+      total_requests:
+        description: "Total number of requests to make"
+        required: true
+        default: "5000"
+      sleep_duration:
+        description: "Sleep duration between requests (in seconds, e.g., 0.5 or 1)"
+        required: true
+        default: "2"
+
+jobs:
+  execute-load-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: 📦 Install HTTP/2 Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "httpx[http2]==0.27.0"
+
+      - name: 🔨 Generate & Run Load Tester
+        env:
+          # Passes the GitHub UI inputs to the Python script
+          TOTAL_REQUESTS: ${{ github.event.inputs.total_requests }}
+          SLEEP_DURATION: ${{ github.event.inputs.sleep_duration }}
+        run: |
+          cat << 'EOF' > load_tester.py
+          import httpx
+          import random
+          import time
+          import os
+
+          # ---------------------------------------------------------
+          # ⚙️ CONFIGURATION
+          # ---------------------------------------------------------
+          TOTAL_REQUESTS = int(os.environ.get("TOTAL_REQUESTS", 500))
+          SLEEP_DURATION = float(os.environ.get("SLEEP_DURATION", 0.5))
+
+          # ⚠️ PASTE YOUR TOP 50 IMAGE URLS HERE ⚠️
+          IMAGE_URLS = [
+              "https://media.moctale.in/images/1c8c57dc-fdf8-4d15-9004-ad5e44087079.jpg",
+              "https://media.moctale.in/images/35c3b9fe-a40f-4935-a3df-752c7918e215.jpg",
+              "https://media.moctale.in/images/91f21ad9-64ee-4dae-b9f2-caa3a34047dd.jpg",
+              "https://media.moctale.in/images/5d2241f4-4360-40af-9b92-f99193d22d6c.jpg",
+              "https://media.moctale.in/images/dd5bfdae-9123-432c-8ee1-01dec3dfd60f.jpg",
+              "https://media.moctale.in/images/122c3a0c-af58-4528-8f63-b179e9c08f60.jpg",
+              "https://media.moctale.in/images/289567a5-926c-4ed2-b0be-a0a05f26b06f.jpg",
+              "https://media.moctale.in/images/d21dbbf0-7b52-470f-ae67-5eea678a82ac.jpg"
+          ]
+
+          def run_load_test():
+              if not IMAGE_URLS or IMAGE_URLS[0] == "":
+                  print("❌ Error: Please add URLs to the IMAGE_URLS list in the YAML file.")
+                  return
+
+              print(f"🚀 Starting Load Test: {TOTAL_REQUESTS} requests, {SLEEP_DURATION}s delay...")
+              print("-" * 80)
+
+              # Using httpx Client with HTTP/2 enabled natively
+              with httpx.Client(http2=True, timeout=15.0) as client:
+                  for i in range(TOTAL_REQUESTS):
+                      # Pick a random image URL from the static list
+                      url = random.choice(IMAGE_URLS)
+                      
+                      # Generate random Q value between 0.100000 and 99.000000
+                      random_q = f"{random.uniform(0.1, 99.0):.6f}"
+                      
+                      # Build headers with dynamic cache-busting mechanisms
+                      headers = {
+                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+                          "Accept": f"image/png;q={random_q}",
+                          "Sec-Fetch-Site": "same-site",
+                          "Sec-Fetch-Mode": "no-cors",
+                          "Sec-Fetch-Dest": "image",
+                          "Referer": "https://mysite.in/",
+                          "Priority": "0",
+                          "Cache-Control": "no-cache",
+                          "Pragma": "no-cache"
+                      }
+
+                      try:
+                          response = client.get(url, headers=headers)
+                          
+                          # Extract X-Cache header. httpx handles case-insensitivity automatically.
+                          # If header is missing (e.g. bypassed CDN), defaults to 'No-Cache-Header'
+                          x_cache = response.headers.get("x-cache", "No-Cache-Header")
+                          status_code = response.status_code
+                          
+                          # Print in the exact requested format
+                          print(f"[{x_cache}] [{status_code}] [{url}]")
+                          
+                      except Exception as e:
+                          print(f"[Error] [000] [{url}] -> {str(e)}")
+
+                      # Enforce sleep duration (except on the very last request)
+                      if i < TOTAL_REQUESTS - 1:
+                          time.sleep(SLEEP_DURATION)
+                          
+              print("-" * 80)
+              print("✅ Load Test Completed Successfully.")
+
+          if __name__ == "__main__":
+              run_load_test()
+          EOF
+
+          # Execute the dynamically generated python script
+          python load_tester.py
