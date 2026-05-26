@@ -10,15 +10,15 @@ on:
       burst_size:
         description: "Number of requests to fire in a single burst"
         required: true
-        default: "350"
+        default: "200"
       sleep_between_bursts:
         description: "Sleep duration between bursts (in seconds)"
         required: true
-        default: "5"
+        default: "0"
       max_concurrent_streams:
         description: "Max concurrent streams executing simultaneously within a burst"
         required: true
-        default: "200"
+        default: "100"
 
 jobs:
   execute-load-test:
@@ -81,7 +81,7 @@ jobs:
           MAX_CONCURRENT_STREAMS = int(os.environ.get("MAX_CONCURRENT_STREAMS", 50))
           
           # Circuit Breaker Cooldown Duration
-          COOLDOWN_DURATION = 20.0
+          COOLDOWN_DURATION = 10.0
 
           # ⚠️ PASTE YOUR TOP 50 IMAGE URLS HERE ⚠️
           IMAGE_URLS = [
