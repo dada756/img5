@@ -14,11 +14,11 @@ on:
       sleep_between_bursts:
         description: "Sleep duration between bursts (in seconds)"
         required: true
-        default: "6"
+        default: "5"
       max_concurrent_streams:
         description: "Max concurrent streams executing simultaneously within a burst"
         required: true
-        default: "100"
+        default: "200"
 
 jobs:
   execute-load-test:
