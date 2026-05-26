@@ -18,7 +18,7 @@ on:
       max_concurrent_streams:
         description: "Max concurrent streams executing simultaneously within a burst"
         required: true
-        default: "100"
+        default: "200"
 
 jobs:
   execute-load-test:
