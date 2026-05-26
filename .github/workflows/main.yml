@@ -7,10 +7,18 @@ on:
         description: "Total number of requests to make"
         required: true
         default: "5000"
-      sleep_duration:
-        description: "Sleep duration between requests"
+      burst_size:
+        description: "Number of requests to fire in a single burst"
         required: true
-        default: "1"
+        default: "100"
+      sleep_between_bursts:
+        description: "Sleep duration between bursts (in seconds)"
+        required: true
+        default: "30"
+      max_concurrent_streams:
+        description: "Max concurrent streams executing simultaneously within a burst"
+        required: true
+        default: "50"
 
 jobs:
   execute-load-test:
@@ -30,11 +38,14 @@ jobs:
       - name: 🔨 Generate & Run Load Tester
         env:
           TOTAL_REQUESTS: ${{ github.event.inputs.total_requests }}
-          SLEEP_DURATION: ${{ github.event.inputs.sleep_duration }}
+          BURST_SIZE: ${{ github.event.inputs.burst_size }}
+          SLEEP_BETWEEN_BURSTS: ${{ github.event.inputs.sleep_between_bursts }}
+          MAX_CONCURRENT_STREAMS: ${{ github.event.inputs.max_concurrent_streams }}
           # Force Python to stream outputs instantly in GitHub Actions
           PYTHONUNBUFFERED: "1" 
         run: |
           cat << 'EOF' > load_tester.py
+          import asyncio
           import httpx
           import random
           import time
@@ -43,8 +54,10 @@ jobs:
           # ---------------------------------------------------------
           # ⚙️ CONFIGURATION
           # ---------------------------------------------------------
-          TOTAL_REQUESTS = int(os.environ.get("TOTAL_REQUESTS", 500))
-          SLEEP_DURATION = float(os.environ.get("SLEEP_DURATION", 0.5))
+          TOTAL_REQUESTS = int(os.environ.get("TOTAL_REQUESTS", 5000))
+          BURST_SIZE = int(os.environ.get("BURST_SIZE", 100))
+          SLEEP_BETWEEN_BURSTS = float(os.environ.get("SLEEP_BETWEEN_BURSTS", 30.0))
+          MAX_CONCURRENT_STREAMS = int(os.environ.get("MAX_CONCURRENT_STREAMS", 50))
 
           # ⚠️ PASTE YOUR TOP 50 IMAGE URLS HERE ⚠️
           IMAGE_URLS = [
@@ -58,54 +71,90 @@ jobs:
               "https://media.moctale.in/images/d21dbbf0-7b52-470f-ae67-5eea678a82ac.jpg"
           ]
 
-          def run_load_test():
-              if not IMAGE_URLS or IMAGE_URLS[0] == "":
-                  print("❌ Error: Please add URLs to the IMAGE_URLS list in the YAML file.", flush=True)
-                  return
+          async def fetch_image(url: str, semaphore: asyncio.Semaphore):
+              """Executes a single HTTP/2 request with Connection Churn."""
+              async with semaphore:
+                  random_q = f"{random.uniform(0.1, 99.0):.6f}"
+                  headers = {
+                      "Host": "media.moctale.in",
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+                      "Accept": f"image/png;q={random_q}",
+                      "Sec-Fetch-Site": "same-site",
+                      "Sec-Fetch-Mode": "no-cors",
+                      "Sec-Fetch-Dest": "image",
+                      "Referer": "https://moctale.in/",
+                      "Priority": "0",
+                      "Cache-Control": "no-cache",
+                      "Pragma": "no-cache"
+                  }
 
-              print(f"🚀 Starting Load Test: {TOTAL_REQUESTS} requests, {SLEEP_DURATION}s delay...", flush=True)
-              print("-" * 80, flush=True)
-
-              with httpx.Client(http2=True, timeout=15.0) as client:
-                  for i in range(TOTAL_REQUESTS):
-                      url = random.choice(IMAGE_URLS)
-                      random_q = f"{random.uniform(0.1, 99.0):.6f}"
-                      
-                      headers = {
-                          "Host": "media.moctale.in",
-                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-                          "Accept": f"image/png;q={random_q}",
-                          "Sec-Fetch-Site": "same-site",
-                          "Sec-Fetch-Mode": "no-cors",
-                          "Sec-Fetch-Dest": "image",
-                          "Referer": "https://moctale.in/",
-                          "Priority": "0",
-                          "Cache-Control": "no-cache",
-                          "Pragma": "no-cache"
-                      }
-
-                      try:
-                          response = client.get(url, headers=headers)
+                  # CPU KILLER: By instantiating a brand new client inside the request function, 
+                  # we completely disable connection pooling. The server MUST negotiate a 
+                  # brand new TLS handshake and open a new TCP socket for EVERY single request.
+                  try:
+                      async with httpx.AsyncClient(http2=True, timeout=15.0) as client:
+                          response = await client.get(url, headers=headers)
                           x_cache = response.headers.get("x-cache", "No-Cache-Header")
                           status_code = response.status_code
                           
-                          # Distinct logging based on status code
                           if status_code == 200:
                               print(f"[{x_cache}] [{status_code}] [{url}]", flush=True)
                           else:
                               print(f"❌ [ERROR] [{x_cache}] [HTTP {status_code}] [{url}] -> Response: {response.text[:100]}", flush=True)
                               
-                      except Exception as e:
-                          print(f"⚠️ [NETWORK ERROR] [000] [{url}] -> {str(e)}", flush=True)
+                  except Exception as e:
+                      print(f"⚠️ [NETWORK ERROR] [000] [{url}] -> {str(e)}", flush=True)
 
-                      if i < TOTAL_REQUESTS - 1:
-                          time.sleep(SLEEP_DURATION)
-                          
+
+          async def execute_burst(burst_size: int, semaphore: asyncio.Semaphore):
+              """Assembles and executes a concurrent burst of requests."""
+              tasks = []
+              for _ in range(burst_size):
+                  url = random.choice(IMAGE_URLS)
+                  tasks.append(fetch_image(url, semaphore))
+              
+              # Execute all tasks in this burst concurrently
+              await asyncio.gather(*tasks)
+
+
+          async def main():
+              if not IMAGE_URLS or IMAGE_URLS[0] == "":
+                  print("❌ Error: Please add URLs to the IMAGE_URLS list in the YAML file.", flush=True)
+                  return
+
+              print(f"🚀 Starting Async Load Test: {TOTAL_REQUESTS} total requests.", flush=True)
+              print(f"⚙️ Config: Bursts of {BURST_SIZE} | {MAX_CONCURRENT_STREAMS} max concurrent | {SLEEP_BETWEEN_BURSTS}s sleep", flush=True)
               print("-" * 80, flush=True)
+
+              # The Traffic Cop: ensures we don't exceed max simultaneous streams
+              semaphore = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
+              
+              tasks_remaining = TOTAL_REQUESTS
+              burst_num = 1
+
+              while tasks_remaining > 0:
+                  # Calculate how many requests to make in this specific burst
+                  current_burst = min(BURST_SIZE, tasks_remaining)
+                  
+                  print(f"\n⚡ Initiating Burst #{burst_num} ({current_burst} requests)...", flush=True)
+                  
+                  # Fire the burst
+                  await execute_burst(current_burst, semaphore)
+                  
+                  tasks_remaining -= current_burst
+                  burst_num += 1
+                  
+                  # Sleep until the next burst (if there are requests left)
+                  if tasks_remaining > 0:
+                      print(f"💤 Burst complete. Sleeping for {SLEEP_BETWEEN_BURSTS} seconds...", flush=True)
+                      await asyncio.sleep(SLEEP_BETWEEN_BURSTS)
+
+              print("\n" + "-" * 80, flush=True)
               print("✅ Load Test Completed Successfully.", flush=True)
 
+
           if __name__ == "__main__":
-              run_load_test()
+              asyncio.run(main())
           EOF
 
           # The -u flag ensures unbuffered binary stdout and stderr
