@@ -10,7 +10,7 @@ on:
       burst_size:
         description: "Number of requests to fire in a single burst"
         required: true
-        default: "200"
+        default: "350"
       sleep_between_bursts:
         description: "Sleep duration between bursts (in seconds)"
         required: true
