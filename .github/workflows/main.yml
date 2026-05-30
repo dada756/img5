@@ -34,13 +34,13 @@ jobs:
               "https://dm2m3fxlnuun4.cloudfront.net/English+/Movie+Poster/Paddington+Poster.jpg"
           ]
 
-          TOTAL_REQUESTS = 50000
+          TOTAL_REQUESTS = 20
 
           HEADERS = {
               "Host": "dm2m3fxlnuun4.cloudfront.net",
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-              "Accept": "image/avif,image/webp,image/apng,image/svg+xml;",
-              "Sec-Fetch-Site": "same-site",
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+              "Sec-Fetch-Site": "cross-site",
               "Sec-Fetch-Mode": "no-cors",
               "Sec-Fetch-Dest": "image",
               "Referer": "https://knitt.app/",
