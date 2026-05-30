@@ -56,8 +56,9 @@ jobs:
                       headers=HEADERS
                   ) as response:
                       await response.read()
+                      return response.status
               except Exception:
-                  pass
+                  return None
 
           # ---------------- MAIN EXECUTOR ---------------- #
           async def main():
@@ -84,18 +85,26 @@ jobs:
                   timeout=timeout
               ) as session:
 
-                  while True:
-                      tasks = [
-                          asyncio.create_task(
-                              fetch_url(
-                                  URLS[i % len(URLS)],
-                                  session
-                              )
+                  tasks = [
+                      asyncio.create_task(
+                          fetch_url(
+                              URLS[i % len(URLS)],
+                              session
                           )
-                          for i in range(TOTAL_REQUESTS)
-                      ]
+                      )
+                      for i in range(TOTAL_REQUESTS)
+                  ]
 
-                      await tqdm.gather(*tasks, desc="Running Load Test")
+                  results = await tqdm.gather(*tasks, desc="Running Load Test")
+              
+              success_count = sum(1 for status in results if status == 200)
+              success_percentage = (success_count / TOTAL_REQUESTS) * 100
+
+              print("\nLoad Test Finished.")
+              print(f"Total Requests: {TOTAL_REQUESTS}")
+              print(f"Successful Requests (200 OK): {success_count}")
+              print(f"Success Rate: {success_percentage:.2f}%")
+
 
           if __name__ == "__main__":
               if os.name == "nt":
