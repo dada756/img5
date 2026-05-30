@@ -23,6 +23,7 @@ jobs:
           import asyncio
           import aiohttp
           import os
+          import logging
           from tqdm.asyncio import tqdm
 
           # ---------------- CONFIGURATION ---------------- #
@@ -48,16 +49,28 @@ jobs:
               "Pragma": "no-cache"
           }
 
+          # ---------------- LOGGING SETUP ---------------- #
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(levelname)s - %(message)s'
+          )
+
           # ---------------- WORKER FUNCTION ---------------- #
           async def fetch_url(url, session):
               try:
-                  async with session.get(
-                      url,
-                      headers=HEADERS
-                  ) as response:
+                  async with session.get(url, headers=HEADERS) as response:
                       await response.read()
+                      if response.status != 200:
+                          logging.warning(f"URL: {url} - Received status code: {response.status}")
                       return response.status
-              except Exception:
+              except aiohttp.ClientConnectorError as e:
+                  logging.error(f"URL: {url} - Connection Error: {e}")
+                  return None
+              except asyncio.TimeoutError:
+                  logging.error(f"URL: {url} - Request timed out.")
+                  return None
+              except Exception as e:
+                  logging.error(f"URL: {url} - An unexpected error occurred: {e}", exc_info=True)
                   return None
 
           # ---------------- MAIN EXECUTOR ---------------- #
@@ -96,15 +109,20 @@ jobs:
                   ]
 
                   results = await tqdm.gather(*tasks, desc="Running Load Test")
-              
+
+              # Analysis of results
               success_count = sum(1 for status in results if status == 200)
-              success_percentage = (success_count / TOTAL_REQUESTS) * 100
-
-              print("\nLoad Test Finished.")
-              print(f"Total Requests: {TOTAL_REQUESTS}")
+              failed_count = TOTAL_REQUESTS - sum(1 for status in results if status is not None)
+              
+              print("\n--- Load Test Summary ---")
+              print(f"Total Requests Sent: {TOTAL_REQUESTS}")
               print(f"Successful Requests (200 OK): {success_count}")
-              print(f"Success Rate: {success_percentage:.2f}%")
-
+              print(f"Failed Requests (Errors/Timeouts): {failed_count}")
+              
+              if TOTAL_REQUESTS > 0:
+                  success_percentage = (success_count / TOTAL_REQUESTS) * 100
+                  print(f"Success Rate: {success_percentage:.2f}%")
+              print("--------------------------\n")
 
           if __name__ == "__main__":
               if os.name == "nt":
