@@ -1,7 +1,7 @@
 name: safe and warranted, consented Load Test
 
 # Triggers the workflow manually from the GitHub Actions UI
-on: 
+on:
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install aiohttp
+        run: pip install aiohttp tqdm
 
       - name: Execute Embedded Python Script
         run: |
@@ -23,6 +23,7 @@ jobs:
           import asyncio
           import aiohttp
           import os
+          from tqdm.asyncio import tqdm
 
           # ---------------- CONFIGURATION ---------------- #
           URLS = [
@@ -94,7 +95,7 @@ jobs:
                           for i in range(TOTAL_REQUESTS)
                       ]
 
-                      await asyncio.gather(*tasks)
+                      await tqdm.gather(*tasks, desc="Running Load Test")
 
           if __name__ == "__main__":
               if os.name == "nt":
