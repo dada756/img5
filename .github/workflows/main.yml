@@ -34,7 +34,7 @@ jobs:
               "https://dm2m3fxlnuun4.cloudfront.net/English+/Movie+Poster/Paddington+Poster.jpg"
           ]
 
-          TOTAL_REQUESTS = 20
+          TOTAL_REQUESTS = 10000
 
           HEADERS = {
               "Host": "dm2m3fxlnuun4.cloudfront.net",
