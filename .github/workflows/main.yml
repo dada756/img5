@@ -25,6 +25,7 @@ jobs:
           import os
           import logging
           from tqdm.asyncio import tqdm
+          from asyncio import Semaphore
 
           # ---------------- CONFIGURATION ---------------- #
           URLS = [
@@ -34,12 +35,18 @@ jobs:
               "https://dm2m3fxlnuun4.cloudfront.net/English+/Movie+Poster/Paddington+Poster.jpg"
           ]
 
-          TOTAL_REQUESTS = 10000
+          # --- Load Test Parameters ---
+          CONCURRENCY_LIMIT = 500  # Max number of concurrent requests
+          REQUESTS_PER_BATCH = 1000 # Number of requests to launch each second
+          NUM_BATCHES = 50 # Number of batches to run
+          BATCH_DELAY_SECONDS = 1 # Delay between each batch
+          TOTAL_REQUESTS = REQUESTS_PER_BATCH * NUM_BATCHES
+
 
           HEADERS = {
               "Host": "dm2m3fxlnuun4.cloudfront.net",
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml;",
               "Sec-Fetch-Site": "cross-site",
               "Sec-Fetch-Mode": "no-cors",
               "Sec-Fetch-Dest": "image",
@@ -56,29 +63,32 @@ jobs:
           )
 
           # ---------------- WORKER FUNCTION ---------------- #
-          async def fetch_url(url, session):
-              try:
-                  async with session.get(url, headers=HEADERS) as response:
-                      await response.read()
-                      if response.status != 200:
-                          logging.warning(f"URL: {url} - Received status code: {response.status}")
-                      return response.status
-              except aiohttp.ClientConnectorError as e:
-                  logging.error(f"URL: {url} - Connection Error: {e}")
-                  return None
-              except asyncio.TimeoutError:
-                  logging.error(f"URL: {url} - Request timed out.")
-                  return None
-              except Exception as e:
-                  logging.error(f"URL: {url} - An unexpected error occurred: {e}", exc_info=True)
-                  return None
+          async def fetch_url(url, session, semaphore):
+              # Wait for a free slot from the semaphore
+              async with semaphore:
+                  try:
+                      async with session.get(url, headers=HEADERS) as response:
+                          await response.read()
+                          if response.status != 200:
+                              logging.warning(f"URL: {url} - Received status code: {response.status}")
+                          return response.status
+                  except aiohttp.ClientConnectorError as e:
+                      logging.error(f"URL: {url} - Connection Error: {e}")
+                      return None
+                  except asyncio.TimeoutError:
+                      logging.error(f"URL: {url} - Request timed out.")
+                      return None
+                  except Exception as e:
+                      logging.error(f"URL: {url} - An unexpected error occurred: {e}", exc_info=True)
+                      return None
 
           # ---------------- MAIN EXECUTOR ---------------- #
           async def main():
-              print("Starting aggressive load test...")
+              print("Starting aggressive load test with concurrency limiting and ramp-up...")
+              print(f"Configuration: {CONCURRENCY_LIMIT} concurrent requests, ramping up {REQUESTS_PER_BATCH} reqs/{BATCH_DELAY_SECONDS}s.")
 
               connector = aiohttp.TCPConnector(
-                  limit=0,
+                  limit=0, # Let the semaphore handle connection limiting
                   limit_per_host=0,
                   ttl_dns_cache=300,
                   ssl=False,
@@ -87,32 +97,47 @@ jobs:
               )
 
               timeout = aiohttp.ClientTimeout(
-                  total=30,
+                  total=60, # Increased timeout for potential delays under load
                   connect=10,
                   sock_connect=10,
                   sock_read=30
               )
+
+              semaphore = Semaphore(CONCURRENCY_LIMIT)
+              all_tasks = []
 
               async with aiohttp.ClientSession(
                   connector=connector,
                   timeout=timeout
               ) as session:
 
-                  tasks = [
-                      asyncio.create_task(
-                          fetch_url(
-                              URLS[i % len(URLS)],
-                              session
+                  # Gradual Ramp-Up Loop
+                  for i in range(NUM_BATCHES):
+                      logging.info(f"Ramping up: Launching batch {i + 1}/{NUM_BATCHES}...")
+                      
+                      batch_tasks = [
+                          asyncio.create_task(
+                              fetch_url(
+                                  URLS[j % len(URLS)],
+                                  session,
+                                  semaphore
+                              )
                           )
-                      )
-                      for i in range(TOTAL_REQUESTS)
-                  ]
+                          for j in range(REQUESTS_PER_BATCH)
+                      ]
+                      all_tasks.extend(batch_tasks)
+                      
+                      if i < NUM_BATCHES - 1:
+                          await asyncio.sleep(BATCH_DELAY_SECONDS)
 
-                  results = await tqdm.gather(*tasks, desc="Running Load Test")
+                  logging.info("All tasks have been launched. Waiting for them to complete.")
+                  
+                  # Wait for all tasks to complete with a progress bar
+                  results = await tqdm.gather(*all_tasks, desc="Running Load Test")
 
               # Analysis of results
               success_count = sum(1 for status in results if status == 200)
-              failed_count = TOTAL_REQUESTS - sum(1 for status in results if status is not None)
+              failed_count = sum(1 for status in results if status is None)
               
               print("\n--- Load Test Summary ---")
               print(f"Total Requests Sent: {TOTAL_REQUESTS}")
